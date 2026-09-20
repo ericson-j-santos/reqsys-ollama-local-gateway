@@ -1,0 +1,35 @@
+name: Settings Hardening Evidence
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  settings-hardening-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate hardening documentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f docs/GITHUB_SETTINGS_HARDENING.md
+          grep -q "Branch protection" docs/GITHUB_SETTINGS_HARDENING.md
+          grep -q "Required checks" docs/GITHUB_SETTINGS_HARDENING.md
+          grep -q "Environments" docs/GITHUB_SETTINGS_HARDENING.md
+          grep -q "prod" docs/GITHUB_SETTINGS_HARDENING.md
+
+      - name: Summary
+        run: |
+          {
+            echo "## Settings Hardening Evidence"
+            echo ""
+            echo "Administrative hardening guidance is versioned in docs/GITHUB_SETTINGS_HARDENING.md."
+            echo "Manual GitHub settings remain outside this workflow's mutation scope."
+          } >> "$GITHUB_STEP_SUMMARY"
