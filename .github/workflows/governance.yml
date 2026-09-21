@@ -28,7 +28,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if grep -R "CORS.*\*" -n src docs .github 2>/dev/null; then
+          if grep -R "CORS.*\*" -n src docs .github --exclude=governance.yml 2>/dev/null; then
             echo "CORS wildcard detected"
             exit 1
           fi
