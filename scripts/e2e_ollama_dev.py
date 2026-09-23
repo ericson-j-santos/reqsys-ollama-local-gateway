@@ -92,6 +92,9 @@ def main() -> int:
         "gateway_url": GATEWAY_URL,
         "model": model,
         "ollama_tags_readback": True,
+        "models_negative_auth_status": None,
+        "models_positive_status": None,
+        "models_contains_selected_model": False,
         "negative_auth_status": None,
         "positive_status": None,
         "response_content_sha256": None,
@@ -101,6 +104,46 @@ def main() -> int:
 
     try:
         wait_for_gateway()
+
+        models_negative = httpx.get(
+            f"{GATEWAY_URL}/v1/models",
+            headers={
+                "Authorization": "Bearer invalid-e2e-token",
+                "X-Correlation-ID": f"{correlation_id}-models-negative",
+            },
+            timeout=10.0,
+        )
+        evidence["models_negative_auth_status"] = models_negative.status_code
+        if models_negative.status_code != 401:
+            fail(f"models_negative_auth_expected_401_got_{models_negative.status_code}")
+
+        models_correlation_id = f"{correlation_id}-models"
+        models_positive = httpx.get(
+            f"{GATEWAY_URL}/v1/models",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Correlation-ID": models_correlation_id,
+            },
+            timeout=10.0,
+        )
+        evidence["models_positive_status"] = models_positive.status_code
+        if models_positive.status_code != 200:
+            fail(f"models_positive_expected_200_got_{models_positive.status_code}")
+
+        models_payload = models_positive.json()
+        if models_payload.get("correlation_id") != models_correlation_id:
+            fail("models_correlation_id_mismatch")
+        models_data = models_payload.get("data")
+        if not isinstance(models_data, list):
+            fail("models_data_missing")
+        model_ids = {
+            item.get("id")
+            for item in models_data
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
+        if model not in model_ids:
+            fail("selected_model_missing_from_gateway_models")
+        evidence["models_contains_selected_model"] = True
 
         request_payload = {
             "model": model,

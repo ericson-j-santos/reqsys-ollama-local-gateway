@@ -2,8 +2,9 @@
 
 ## Estado funcional
 
-O gateway possui healthcheck e, na versão 0.2.0, contrato não-streaming
-`POST /v1/chat/completions` para encaminhamento ao Ollama local.
+O gateway possui healthcheck e, na versão 0.3.0, contratos OpenAI-compatible para
+`GET /v1/models` e `POST /v1/chat/completions`, ambos protegidos pela mesma autenticação
+governada.
 
 ## Checklist operacional
 
@@ -13,12 +14,14 @@ O gateway possui healthcheck e, na versão 0.2.0, contrato não-streaming
 - [x] Dependabot
 - [x] Workflows CI/Governance
 - [x] Healthcheck inicial
+- [x] Descoberta OpenAI-compatible de modelos
 - [x] Contrato OpenAI-compatible de chat
 - [x] Bearer token fail-closed
 - [x] Timeout configurável
 - [x] Propagação de correlation_id
 - [x] Testes de contrato, autenticação e falha upstream
-- [ ] E2E real contra Ollama local no runtime autorizado
+- [x] E2E real hermético Gateway → Ollama em DEV/CI
+- [ ] Smoke adicional no PC24x7 com runtime local autorizado
 - [ ] Branch protection em `main`
 - [ ] Environments `dev`, `hml`, `prod`
 - [ ] Secrets governados, quando necessários
@@ -26,11 +29,13 @@ O gateway possui healthcheck e, na versão 0.2.0, contrato não-streaming
 
 ## Validação do runtime
 
-A integração só deve ser considerada ponta a ponta quando uma chamada real ao endpoint do gateway
-atingir o Ollama local e a resposta for observada no mesmo SHA/ambiente/correlation_id. Testes com
-mock comprovam o contrato e os controles de erro, mas não substituem essa evidência.
+O E2E hermético deve obter a lista de modelos diretamente do Ollama, consultar `/v1/models`
+pelo gateway e provar que o mesmo modelo está presente antes de executar o chat. A evidência deve
+permanecer vinculada ao mesmo SHA, ambiente e `correlation_id`.
+
+Testes com mock comprovam contrato e controles de erro, mas não substituem a evidência real.
 
 ## Próximo passo operacional
 
-Após CI/Governance da PR, executar smoke E2E no PC24x7 com Ollama acessível, registrando
-`correlation_id`, modelo, SHA e resultado sem persistir prompt sensível.
+Concluir o hardening administrativo registrado na issue #3 e executar smoke adicional no PC24x7
+quando o runtime autorizado estiver disponível, sem promover automaticamente para HML/PROD.
