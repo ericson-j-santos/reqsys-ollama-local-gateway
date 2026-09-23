@@ -15,58 +15,75 @@ concurrency:
 
 jobs:
   e2e:
-    name: Gateway → Ollama real on Noteri DEV
-    runs-on: [self-hosted, Windows, X64, noteri, reqsys-dev]
-    timeout-minutes: 12
+    name: Gateway → Ollama real hermetic DEV
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       CORRELATION_ID: ollama-gateway-e2e-${{ github.run_id }}-${{ github.run_attempt }}
       EVIDENCE_FILE: artifacts/ollama-gateway-e2e-dev/evidence.json
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      OLLAMA_IMAGE: ollama/ollama:0.34.3
+      OLLAMA_MODEL: smollm2:135m
 
     steps:
       - name: Checkout immutable PR SHA
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.EXPECTED_SHA }}
           fetch-depth: 1
 
-      - name: Verify exact DEV host
-        shell: powershell
-        run: |
-          if ($env:COMPUTERNAME.ToUpperInvariant() -ne "NOTERI") {
-            throw "UNEXPECTED_HOST: $env:COMPUTERNAME"
-          }
-
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - name: Install isolated dependencies
-        shell: powershell
+      - name: Install isolated gateway dependencies
+        run: python -m pip install --disable-pip-version-check -e ".[dev]"
+
+      - name: Start pinned Ollama and pull compact model
+        shell: bash
         run: |
-          python -m pip install --disable-pip-version-check -e ".[dev]"
+          set -euo pipefail
+          docker run -d --name ollama-e2e -p 11434:11434 "$OLLAMA_IMAGE"
+          for attempt in {1..60}; do
+            if curl --fail --silent --show-error http://127.0.0.1:11434/api/tags >/dev/null; then
+              break
+            fi
+            if [[ "$attempt" -eq 60 ]]; then
+              echo "OLLAMA_HEALTH_TIMEOUT" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          docker exec ollama-e2e ollama pull "$OLLAMA_MODEL"
+          curl --fail --silent --show-error http://127.0.0.1:11434/api/tags             | python -c 'import json,sys; p=json.load(sys.stdin); assert any(m.get("name","").startswith("smollm2:135m") for m in p.get("models",[]))'
 
       - name: Execute real gateway to Ollama E2E
-        shell: powershell
-        run: |
-          python scripts/e2e_ollama_dev.py
+        run: python scripts/e2e_ollama_dev.py
 
       - name: Validate sanitized evidence
         if: always()
-        shell: powershell
+        shell: bash
         run: |
-          if (-not (Test-Path $env:EVIDENCE_FILE)) {
-            throw "E2E_EVIDENCE_MISSING"
-          }
-          $evidence = Get-Content -Raw $env:EVIDENCE_FILE | ConvertFrom-Json
-          if ($evidence.expected_sha -ne $env:EXPECTED_SHA) { throw "E2E_SHA_MISMATCH" }
-          if ($evidence.result -ne "E2E_PASSED") { throw "E2E_NOT_PASSED" }
-          if ($evidence.ollama_tags_readback -ne $true) { throw "OLLAMA_READBACK_MISSING" }
-          if ($evidence.negative_auth_status -ne 401) { throw "NEGATIVE_AUTH_NOT_PROVED" }
-          if ($evidence.positive_status -ne 200) { throw "POSITIVE_FLOW_NOT_PROVED" }
-          if (-not $evidence.response_content_sha256) { throw "RESPONSE_HASH_MISSING" }
-          if ($evidence.production_touched -ne $false) { throw "PRODUCTION_TOUCHED" }
+          set -euo pipefail
+          test -f "$EVIDENCE_FILE"
+          python - "$EVIDENCE_FILE" "$EXPECTED_SHA" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          evidence = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          expected_sha = sys.argv[2]
+          assert evidence["expected_sha"] == expected_sha, "E2E_SHA_MISMATCH"
+          assert evidence["result"] == "E2E_PASSED", "E2E_NOT_PASSED"
+          assert evidence["ollama_tags_readback"] is True, "OLLAMA_READBACK_MISSING"
+          assert evidence["negative_auth_status"] == 401, "NEGATIVE_AUTH_NOT_PROVED"
+          assert evidence["positive_status"] == 200, "POSITIVE_FLOW_NOT_PROVED"
+          assert evidence["response_content_sha256"], "RESPONSE_HASH_MISSING"
+          assert evidence["production_touched"] is False, "PRODUCTION_TOUCHED"
+          assert evidence["deploy_executed"] is False, "DEPLOY_EXECUTED"
+          print("E2E_EVIDENCE_VALIDATED")
+          PY
 
       - name: Upload sanitized E2E evidence
         if: always()
@@ -77,13 +94,22 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Cleanup Ollama container
+        if: always()
+        shell: bash
+        run: docker rm -f ollama-e2e >/dev/null 2>&1 || true
+
       - name: Summary
         if: always()
-        shell: powershell
+        shell: bash
         run: |
-          "## Ollama Gateway E2E DEV" | Add-Content $env:GITHUB_STEP_SUMMARY
-          "- Host esperado: NOTERI" | Add-Content $env:GITHUB_STEP_SUMMARY
-          "- SHA: $env:EXPECTED_SHA" | Add-Content $env:GITHUB_STEP_SUMMARY
-          "- Correlation ID: $env:CORRELATION_ID" | Add-Content $env:GITHUB_STEP_SUMMARY
-          "- Produção tocada: não" | Add-Content $env:GITHUB_STEP_SUMMARY
-          "- Deploy executado: não" | Add-Content $env:GITHUB_STEP_SUMMARY
+          {
+            echo "## Ollama Gateway E2E DEV"
+            echo "- Runtime: GitHub-hosted hermetic"
+            echo "- Ollama: $OLLAMA_IMAGE"
+            echo "- Modelo: $OLLAMA_MODEL"
+            echo "- SHA: $EXPECTED_SHA"
+            echo "- Correlation ID: $CORRELATION_ID"
+            echo "- Produção tocada: não"
+            echo "- Deploy executado: não"
+          } >> "$GITHUB_STEP_SUMMARY"
