@@ -1,0 +1,97 @@
+name: Apply Main Protection Once
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/apply-main-protection-once.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  harden-main:
+    if: >-
+      github.repository == 'ericson-j-santos/reqsys-ollama-local-gateway' &&
+      github.head_ref == 'ops/harden-main-protection-20260923'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Validate governed GitHub App configuration
+        shell: bash
+        env:
+          APP_ID: ${{ vars.REQSYS_STACK_REBASE_APP_ID }}
+          PRIVATE_KEY: ${{ secrets.REQSYS_STACK_REBASE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$APP_ID" || { echo "::error::REQSYS_STACK_REBASE_APP_ID unavailable"; exit 1; }
+          test -n "$PRIVATE_KEY" || { echo "::error::REQSYS_STACK_REBASE_PRIVATE_KEY unavailable"; exit 1; }
+
+      - name: Generate administration token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.REQSYS_STACK_REBASE_APP_ID }}
+          private-key: ${{ secrets.REQSYS_STACK_REBASE_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: reqsys-ollama-local-gateway
+          permission-administration: write
+
+      - name: Apply minimal branch protection
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          before_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          test -n "$before_sha"
+
+          cat > "$RUNNER_TEMP/protection.json" <<'JSON'
+          {
+            "required_status_checks": {
+              "strict": true,
+              "contexts": [
+                "ci",
+                "governance",
+                "settings-hardening-evidence"
+              ]
+            },
+            "enforce_admins": true,
+            "required_pull_request_reviews": null,
+            "restrictions": null,
+            "required_linear_history": false,
+            "allow_force_pushes": false,
+            "allow_deletions": false,
+            "block_creations": false,
+            "required_conversation_resolution": false,
+            "lock_branch": false,
+            "allow_fork_syncing": true
+          }
+          JSON
+
+          gh api             --method PUT             -H "Accept: application/vnd.github+json"             -H "X-GitHub-Api-Version: 2022-11-28"             "repos/${GITHUB_REPOSITORY}/branches/main/protection"             --input "$RUNNER_TEMP/protection.json" > "$RUNNER_TEMP/protection-result.json"
+
+          after_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          test "$before_sha" = "$after_sha"
+
+      - name: Verify protection independently
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh api             -H "Accept: application/vnd.github+json"             -H "X-GitHub-Api-Version: 2022-11-28"             "repos/${GITHUB_REPOSITORY}/branches/main/protection"             > "$RUNNER_TEMP/protection-readback.json"
+
+          jq -e '.enforce_admins.enabled == true' "$RUNNER_TEMP/protection-readback.json" >/dev/null
+          jq -e '.required_status_checks.strict == true' "$RUNNER_TEMP/protection-readback.json" >/dev/null
+          jq -e '
+            [.required_status_checks.contexts[]] as $c |
+            ($c | index("ci")) != null and
+            ($c | index("governance")) != null and
+            ($c | index("settings-hardening-evidence")) != null
+          ' "$RUNNER_TEMP/protection-readback.json" >/dev/null
+
+          echo "BRANCH_PROTECTION_VERIFIED"
+          echo "required_checks=ci,governance,settings-hardening-evidence"
