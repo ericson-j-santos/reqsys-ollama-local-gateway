@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from .config import Settings, load_settings
 
-app = FastAPI(title="ReqSys Ollama Local Gateway", version="0.2.0")
+app = FastAPI(title="ReqSys Ollama Local Gateway", version="0.3.0")
 
 
 class ChatMessage(BaseModel):
@@ -91,6 +91,93 @@ def health(
         "auth_configured": bool(settings.api_token),
         "correlation_id": correlation_id,
         "generated_at_utc": datetime.now(UTC).isoformat(),
+    }
+
+
+@app.get("/v1/models")
+def models(
+    response: Response,
+    x_correlation_id: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> dict[str, object]:
+    settings = load_settings()
+    correlation_id = _correlation_id(x_correlation_id)
+    response.headers["X-Correlation-ID"] = correlation_id
+    _authorize(settings, authorization, correlation_id)
+
+    upstream_url = f"{settings.ollama_base_url.rstrip('/')}/api/tags"
+    try:
+        upstream = httpx.get(
+            upstream_url,
+            timeout=settings.request_timeout_seconds,
+            headers={"X-Correlation-ID": correlation_id},
+        )
+    except httpx.TimeoutException:
+        _raise_gateway_error(
+            status_code=504,
+            code="ollama_timeout",
+            correlation_id=correlation_id,
+        )
+    except httpx.RequestError:
+        _raise_gateway_error(
+            status_code=502,
+            code="ollama_unavailable",
+            correlation_id=correlation_id,
+        )
+
+    if upstream.status_code >= 400:
+        _raise_gateway_error(
+            status_code=502,
+            code="ollama_upstream_error",
+            correlation_id=correlation_id,
+        )
+
+    try:
+        upstream_payload = upstream.json()
+    except ValueError:
+        _raise_gateway_error(
+            status_code=502,
+            code="ollama_invalid_response",
+            correlation_id=correlation_id,
+        )
+
+    if not isinstance(upstream_payload, dict):
+        _raise_gateway_error(
+            status_code=502,
+            code="ollama_invalid_response",
+            correlation_id=correlation_id,
+        )
+
+    upstream_models = upstream_payload.get("models")
+    if not isinstance(upstream_models, list):
+        _raise_gateway_error(
+            status_code=502,
+            code="ollama_invalid_response",
+            correlation_id=correlation_id,
+        )
+
+    data: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for item in upstream_models:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        if not isinstance(name, str) or not name or name in seen:
+            continue
+        seen.add(name)
+        data.append(
+            {
+                "id": name,
+                "object": "model",
+                "created": 0,
+                "owned_by": "ollama",
+            }
+        )
+
+    return {
+        "object": "list",
+        "data": data,
+        "correlation_id": correlation_id,
     }
 
 

@@ -1,6 +1,6 @@
 [project]
 name = "reqsys-ollama-local-gateway"
-version = "0.2.0"
+version = "0.3.0"
 description = "ReqSys Ollama Local Gateway governado"
 requires-python = ">=3.12"
 dependencies = [

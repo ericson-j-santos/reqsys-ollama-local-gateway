@@ -2,10 +2,20 @@
 
 ## Visão
 
-O gateway isola o runtime local de IA dos consumidores. A partir da versão 0.2.0, expõe um
-contrato de chat reutilizável e encaminha a chamada ao Ollama sem expor diretamente o provider.
+O gateway isola o runtime local de IA dos consumidores. A partir da versão 0.3.0, expõe
+descoberta de modelos e chat por contratos OpenAI-compatible, sem exigir que consumidores
+conheçam a API nativa do Ollama.
 
-## Fluxo
+## Fluxos
+
+```text
+Consumidor
+  -> GET /v1/models
+  -> autenticação Bearer
+  -> correlation_id
+  -> Ollama /api/tags
+  -> normalização para lista OpenAI-compatible
+```
 
 ```text
 Consumidor
@@ -23,6 +33,7 @@ Consumidor
 - API FastAPI.
 - Configuração governada por ambiente.
 - Healthcheck com `correlation_id`.
+- Endpoint `/v1/models`.
 - Endpoint `/v1/chat/completions`.
 - Cliente HTTP com timeout limitado.
 - Normalização de erros do provider sem propagação de corpo upstream.
@@ -38,10 +49,11 @@ Consumidor
 ## Segurança
 
 - autenticação permanece ligada por padrão;
-- endpoint de chat falha fechado se autenticação estiver habilitada sem token;
+- endpoints OpenAI-compatible falham fechado se autenticação estiver habilitada sem token;
 - token é lido somente de variável de ambiente;
 - corpo de erro do Ollama não é devolvido ao consumidor;
 - `correlation_id` é propagado ao provider e devolvido ao cliente;
+- descoberta de modelos é somente leitura;
 - streaming não está habilitado neste incremento.
 
 ## Decisões

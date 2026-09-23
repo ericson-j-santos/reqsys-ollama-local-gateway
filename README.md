@@ -11,8 +11,10 @@ entre os consumidores e o runtime/provider local.
 ## Capacidades
 
 - Healthcheck operacional.
+- Contrato `GET /v1/models` compatível com descoberta básica de modelos OpenAI.
 - Contrato `POST /v1/chat/completions` compatível com o formato básico OpenAI.
 - Encaminhamento não-streaming para `Ollama /api/chat`.
+- Descoberta de modelos por `Ollama /api/tags`.
 - Autenticação Bearer governada.
 - Timeout configurável.
 - Propagação de `correlation_id`.
@@ -26,13 +28,13 @@ entre os consumidores e o runtime/provider local.
 | --- | --- | --- |
 | `REQSYS_ENV` | `dev` | Ambiente do gateway |
 | `REQSYS_OLLAMA_BASE_URL` | `http://localhost:11434` | URL do Ollama |
-| `REQSYS_AUTH_REQUIRED` | `true` | Exige Bearer token no endpoint de chat |
+| `REQSYS_AUTH_REQUIRED` | `true` | Exige Bearer token nos endpoints OpenAI-compatible |
 | `REQSYS_API_TOKEN` | vazio | Token esperado pelo gateway |
 | `REQSYS_OLLAMA_TIMEOUT_SECONDS` | `30` | Timeout de chamada, máximo 120 s |
 | `REQSYS_ALLOWED_ORIGINS` | `http://localhost:3000` | Origens governadas |
 
-Quando `REQSYS_AUTH_REQUIRED=true` e `REQSYS_API_TOKEN` não estiver configurado, o endpoint
-de chat falha fechado com HTTP 503.
+Quando `REQSYS_AUTH_REQUIRED=true` e `REQSYS_API_TOKEN` não estiver configurado, os endpoints
+OpenAI-compatible falham fechado com HTTP 503.
 
 ## Execução local
 
@@ -40,7 +42,15 @@ de chat falha fechado com HTTP 503.
 python -m reqsys_ollama_gateway.app
 ```
 
-## Exemplo de contrato
+## Descoberta de modelos
+
+```http
+GET /v1/models
+Authorization: Bearer <token>
+X-Correlation-ID: corr-models-123
+```
+
+## Exemplo de chat
 
 ```http
 POST /v1/chat/completions
