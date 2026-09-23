@@ -11,7 +11,6 @@ from pathlib import Path
 
 import httpx
 
-
 OLLAMA_URL = "http://127.0.0.1:11434"
 GATEWAY_URL = "http://127.0.0.1:18008"
 
