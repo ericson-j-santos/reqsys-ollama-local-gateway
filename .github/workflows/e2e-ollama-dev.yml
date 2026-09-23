@@ -1,0 +1,89 @@
+name: Ollama Gateway E2E DEV
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ollama-gateway-e2e-dev-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Gateway → Ollama real on Noteri DEV
+    runs-on: [self-hosted, Windows, X64, noteri, reqsys-dev]
+    timeout-minutes: 12
+    env:
+      CORRELATION_ID: ollama-gateway-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+      EVIDENCE_FILE: artifacts/ollama-gateway-e2e-dev/evidence.json
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - name: Checkout immutable PR SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          fetch-depth: 1
+
+      - name: Verify exact DEV host
+        shell: powershell
+        run: |
+          if ($env:COMPUTERNAME.ToUpperInvariant() -ne "NOTERI") {
+            throw "UNEXPECTED_HOST: $env:COMPUTERNAME"
+          }
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install isolated dependencies
+        shell: powershell
+        run: |
+          python -m pip install --disable-pip-version-check -e ".[dev]"
+
+      - name: Execute real gateway to Ollama E2E
+        shell: powershell
+        run: |
+          python scripts/e2e_ollama_dev.py
+
+      - name: Validate sanitized evidence
+        if: always()
+        shell: powershell
+        run: |
+          if (-not (Test-Path $env:EVIDENCE_FILE)) {
+            throw "E2E_EVIDENCE_MISSING"
+          }
+          $evidence = Get-Content -Raw $env:EVIDENCE_FILE | ConvertFrom-Json
+          if ($evidence.expected_sha -ne $env:EXPECTED_SHA) { throw "E2E_SHA_MISMATCH" }
+          if ($evidence.result -ne "E2E_PASSED") { throw "E2E_NOT_PASSED" }
+          if ($evidence.ollama_tags_readback -ne $true) { throw "OLLAMA_READBACK_MISSING" }
+          if ($evidence.negative_auth_status -ne 401) { throw "NEGATIVE_AUTH_NOT_PROVED" }
+          if ($evidence.positive_status -ne 200) { throw "POSITIVE_FLOW_NOT_PROVED" }
+          if (-not $evidence.response_content_sha256) { throw "RESPONSE_HASH_MISSING" }
+          if ($evidence.production_touched -ne $false) { throw "PRODUCTION_TOUCHED" }
+
+      - name: Upload sanitized E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ollama-gateway-e2e-dev-${{ github.run_id }}
+          path: artifacts/ollama-gateway-e2e-dev/evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Summary
+        if: always()
+        shell: powershell
+        run: |
+          "## Ollama Gateway E2E DEV" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "- Host esperado: NOTERI" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "- SHA: $env:EXPECTED_SHA" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "- Correlation ID: $env:CORRELATION_ID" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "- Produção tocada: não" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "- Deploy executado: não" | Add-Content $env:GITHUB_STEP_SUMMARY
