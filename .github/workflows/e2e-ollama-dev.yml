@@ -90,7 +90,7 @@ jobs:
 
       - name: Upload sanitized E2E evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ollama-gateway-e2e-dev-${{ github.run_id }}
           path: artifacts/ollama-gateway-e2e-dev/evidence.json
