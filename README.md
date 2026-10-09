@@ -72,3 +72,25 @@ O streaming permanece fora deste incremento.
 ## Segurança
 
 Consulte `SECURITY.md`. Não versione tokens, prompts sensíveis ou dados pessoais desnecessários.
+
+## Qualificação de inferência local sem créditos de IA
+
+O E2E existente `Ollama Gateway E2E DEV` inicia seu Ollama descartável com
+`OLLAMA_NO_CLOUD=1` e publica a porta somente em loopback. Antes de enviar o
+prompt, `scripts/local_ollama_proof.py` verifica a configuração do container,
+o único modelo autorizado (`smollm2:135m`), seu digest e metadados locais.
+Após a resposta, consulta `/api/ps` independentemente e exige o mesmo modelo
+carregado localmente. Ausência de prova, modelo remoto, digest divergente,
+configuração ambígua ou evidência de outro SHA/correlação bloqueiam o teste.
+
+O aceite exige **ambos** `evidence.json` e `local-proof.json` da mesma execução:
+resposta real, controles de autenticação, nuvem desabilitada e processo local.
+Repetir a leitura não gera inferência adicional. Os testes unitários usam
+upstreams sintéticos; somente o workflow com Ollama real qualifica a integração.
+
+Esta qualificação cobre apenas gateway → modelo local no CI. Não certifica
+capacidade de programação do modelo compacto, worker autônomo, disponibilidade
+do Noteri/Desktop, implantação, nem a integração completa com o Worker Pool.
+O Docker é reutilizado somente no E2E descartável já existente; nenhum serviço
+físico é instalado ou migrado. As configurações dos runtimes existentes não são
+alteradas por este incremento.
