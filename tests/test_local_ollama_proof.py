@@ -102,9 +102,8 @@ def test_process_requires_matching_loaded_model(change):
 def test_http_errors_and_redirects_fail_closed(status):
     with httpx.Client(transport=httpx.MockTransport(
         lambda request: httpx.Response(status, json={"error": "PRIVATE_VALUE"})
-    ), base_url=proof.BASE_URL) as client:
-        with pytest.raises(proof.LocalProofError) as error:
-            proof.request_json(client, "GET", "/api/tags")
+    ), base_url=proof.BASE_URL) as client, pytest.raises(proof.LocalProofError) as error:
+        proof.request_json(client, "GET", "/api/tags")
     assert "PRIVATE_VALUE" not in str(error.value)
 
 
