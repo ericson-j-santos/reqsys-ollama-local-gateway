@@ -31,4 +31,4 @@ jobs:
         run: ruff check .
 
       - name: Tests
-        run: pytest -q
+        run: pytest -q -W error::starlette.exceptions.StarletteDeprecationWarning
