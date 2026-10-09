@@ -44,7 +44,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker run -d --name ollama-e2e -p 11434:11434 "$OLLAMA_IMAGE"
+          docker run -d --name ollama-e2e -p 127.0.0.1:11434:11434 -e OLLAMA_NO_CLOUD=1 "$OLLAMA_IMAGE"
           for attempt in {1..60}; do
             if curl --fail --silent --show-error http://127.0.0.1:11434/api/tags >/dev/null; then
               break
@@ -58,8 +58,14 @@ jobs:
           docker exec ollama-e2e ollama pull "$OLLAMA_MODEL"
           curl --fail --silent --show-error http://127.0.0.1:11434/api/tags             | python -c 'import json,sys; p=json.load(sys.stdin); assert any(m.get("name","").startswith("smollm2:135m") for m in p.get("models",[]))'
 
+      - name: Prove local-only runtime before inference
+        run: python scripts/local_ollama_proof.py preflight
+
       - name: Execute real gateway to Ollama E2E
         run: python scripts/e2e_ollama_dev.py
+
+      - name: Independently prove local model execution
+        run: python scripts/local_ollama_proof.py readback
 
       - name: Validate sanitized evidence
         if: always()
@@ -85,6 +91,14 @@ jobs:
           assert evidence["response_content_sha256"], "RESPONSE_HASH_MISSING"
           assert evidence["production_touched"] is False, "PRODUCTION_TOUCHED"
           assert evidence["deploy_executed"] is False, "DEPLOY_EXECUTED"
+          assert evidence["cloud_disabled_runtime_readback"] is True, "CLOUD_MODE_UNPROVED"
+          assert evidence["local_model_process_readback"] is True, "LOCAL_INFERENCE_UNPROVED"
+          assert len(evidence["local_model_digest"]) == 64, "LOCAL_MODEL_DIGEST_MISSING"
+          proof = json.loads(Path("artifacts/ollama-gateway-e2e-dev/local-proof.json").read_text())
+          assert proof["result"] == "LOCAL_INFERENCE_PROVED", "LOCAL_PROOF_NOT_PASSED"
+          assert proof["expected_sha"] == expected_sha, "LOCAL_PROOF_SHA_MISMATCH"
+          assert proof["correlation_id"] == evidence["correlation_id"], "LOCAL_PROOF_STALE"
+          assert proof["model_digest"] == evidence["local_model_digest"], "LOCAL_PROOF_DIGEST"
           print("E2E_EVIDENCE_VALIDATED")
           PY
 
@@ -93,7 +107,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ollama-gateway-e2e-dev-${{ github.run_id }}
-          path: artifacts/ollama-gateway-e2e-dev/evidence.json
+          path: artifacts/ollama-gateway-e2e-dev/*.json
           if-no-files-found: error
           retention-days: 30
 
